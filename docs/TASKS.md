@@ -22,7 +22,7 @@ Contract paths (orchestrator-owned; change requests only):
 | I | Web app | `apps/web/` | OpenAPI (mock) | 🔨 spawned |
 | J | CLI + Gateway | `packages/cli/`, `packages/gateway/` | OpenAPI | 🔨 spawned |
 | K | Hosted access + Docs generator | `apps/api/app/hosting/`, `apps/worker/worker/docs/` | OpenAPI | 🔨 spawned |
-| L | Fixtures + QA + CI | `fixtures/`, `tests/e2e/`, `.github/workflows/` | Phase 0 | 🔨 spawned |
+| L | Fixtures + QA + CI | `fixtures/`, `tests/e2e/`, `infra/ci/` | Phase 0 | 🔨 spawned |
 
 ## Acceptance criteria (summary per WS; full briefs in spawn messages)
 
@@ -41,4 +41,5 @@ Contract paths (orchestrator-owned; change requests only):
 
 ## Blockers
 
-(none yet)
+- CI activation: automation token lacks `workflows` permission (D-12). CI definition lives in
+  `infra/ci/ci.yml`; needs a human to copy it to `.github/workflows/` on GitHub.
