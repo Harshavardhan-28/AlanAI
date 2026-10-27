@@ -1,0 +1,26 @@
+{
+  "name": "mcpaudit",
+  "version": "0.1.0",
+  "description": "CLI for the MCP Audit platform: check, install, status",
+  "type": "module",
+  "bin": {
+    "mcpaudit": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "format": "prettier --write src"
+  },
+  "dependencies": {
+    "@mcpaudit/shared": "workspace:*",
+    "commander": "^12.1.0",
+    "undici": "^6.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

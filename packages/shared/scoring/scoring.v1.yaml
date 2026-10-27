@@ -1,0 +1,72 @@
+# MCP Audit scoring configuration — version 1
+# This file is the ONLY place weights, thresholds and hard-fail rules are defined (D-6).
+# Every Score row stores config_version so scores are reproducible. Bump the version on any change.
+version: "1"
+
+# risk_score = min(100, round(sum(category_scores))) — higher = riskier (D-2)
+categories:
+  secrets_exfil:
+    weight: 1.0
+    # points per finding = severity_points[severity] * confidence * weight, capped per category
+    cap: 40
+  malware_exec:
+    weight: 1.0
+    cap: 40
+  supply_chain:
+    weight: 0.9
+    cap: 30
+  prompt_injection:
+    weight: 1.0
+    cap: 35
+  capability_excess:
+    weight: 0.7
+    cap: 20
+  protocol_reliability:
+    weight: 0.4
+    cap: 10
+  compliance:
+    weight: 0.3
+    cap: 10
+  community:
+    weight: 0.8
+    cap: 30
+
+severity_points:
+  info: 1
+  low: 4
+  medium: 10
+  high: 22
+  critical: 40
+
+# Minimum confidence for a finding to contribute points (hard-fail rules ignore this).
+min_confidence: 0.3
+
+# Verdict thresholds on the final risk_score (unless a hard fail fires).
+verdicts:
+  VERIFIED_SAFE: { max: 5 }    # additionally requires: at least one completed audit, zero findings >= medium
+  LOW_RISK: { max: 20 }
+  MODERATE_RISK: { max: 45 }
+  HIGH_RISK: { max: 70 }
+  # > HIGH_RISK.max or any hard fail -> DANGEROUS
+
+# Hard-fail rules: if ANY fires, verdict = DANGEROUS regardless of score (section 6 of the brief).
+# Agents mark findings with hard_fail_rule=<id>; the scoring engine checks them here.
+hard_fails:
+  - id: canary_exfiltration          # dynamic agent: planted canary secret left the sandbox
+  - id: download_and_execute         # confirmed fetch + exec of remote code
+  - id: host_prompt_injection        # confirmed injection payload targeting the host LLM
+  - id: known_malicious_dependency   # dependency on a known-malicious package (OSV malicious)
+  - id: community_quarantine         # N credible high-severity community reports (see community)
+
+community:
+  # Fast-path quarantine: sum of reputation-weighted high/critical reports in window >= threshold
+  quarantine_threshold: 5.0
+  window_hours: 72
+  severities_counted: [high, critical]
+  # reputation weight per reporter = clamp(reporter_reputation, 0.2, 2.0)
+
+# LLM judge: may adjust severity +/- one band within these bounds; may NEVER clear a hard fail
+# and never reduce a category score below its deterministic floor.
+judge:
+  enabled: true
+  max_category_adjustment: 5

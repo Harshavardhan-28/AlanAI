@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcpaudit-shared"
+version = "0.1.0"
+description = "Shared contracts for the MCP Audit platform: agent interface, findings, scoring, LLM abstraction"
+requires-python = ">=3.12"
+dependencies = [
+  "pydantic>=2.9",
+  "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "anthropic>=0.39"]
+
+[tool.setuptools.packages.find]
+include = ["mcpaudit_shared*"]

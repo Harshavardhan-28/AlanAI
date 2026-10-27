@@ -1,0 +1,25 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["apps/api", "apps/worker", "packages/shared/python"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "S", "ASYNC", "RUF"]
+ignore = ["S101"]  # asserts allowed in tests
+
+[tool.ruff.lint.per-file-ignores]
+"apps/api/alembic/versions/**" = ["E501"]  # SQL statements are more readable unbroken
+"apps/api/app/config.py" = ["S105"]  # dev-only defaults; real values come from env
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = ["packages/shared/python", "apps/api", "apps/worker"]
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+testpaths = ["apps/api/tests", "apps/worker/tests", "packages/shared/python/tests"]
+asyncio_mode = "auto"

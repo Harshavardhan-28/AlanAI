@@ -1,0 +1,1222 @@
+openapi: 3.0.3
+info:
+  title: MCP Audit API
+  version: 0.1.0
+  description: |
+    Security audit + risk-scoring marketplace for MCP servers.
+    Canonical contract for apps/api, apps/web, packages/cli, packages/gateway.
+    Score convention: risk_score 0-100, HIGHER = RISKIER (D-2).
+servers:
+  - url: http://localhost:8000
+tags:
+  - name: auth
+  - name: mcps
+  - name: versions
+  - name: audits
+  - name: reviews
+  - name: reports
+  - name: gateway
+  - name: hosting
+  - name: admin
+
+paths:
+  /v1/health:
+    get:
+      summary: Liveness/readiness
+      operationId: getHealth
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  # ---------------- auth ----------------
+  /v1/auth/register:
+    post:
+      tags: [auth]
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+        "409":
+          $ref: "#/components/responses/Error"
+  /v1/auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      description: Sets HttpOnly session cookie.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      responses:
+        "204":
+          description: Logged out
+  /v1/auth/me:
+    get:
+      tags: [auth]
+      operationId: getMe
+      security: [{ session: [] }, { apiKey: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserResponse"
+        "401":
+          $ref: "#/components/responses/Error"
+  /v1/auth/api-keys:
+    get:
+      tags: [auth]
+      operationId: listApiKeys
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ApiKeyResponse"
+    post:
+      tags: [auth]
+      operationId: createApiKey
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApiKeyCreateRequest"
+      responses:
+        "201":
+          description: The only time the plaintext key is returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiKeyCreatedResponse"
+  /v1/auth/api-keys/{keyId}:
+    delete:
+      tags: [auth]
+      operationId: revokeApiKey
+      security: [{ session: [] }]
+      parameters:
+        - $ref: "#/components/parameters/KeyId"
+      responses:
+        "204":
+          description: Revoked
+
+  # ---------------- mcps ----------------
+  /v1/mcps:
+    get:
+      tags: [mcps]
+      operationId: listMcps
+      parameters:
+        - { name: q, in: query, schema: { type: string }, description: Full-text search }
+        - { name: verdict, in: query, schema: { $ref: "#/components/schemas/Verdict" } }
+        - { name: sourceType, in: query, schema: { $ref: "#/components/schemas/SourceType" } }
+        - { name: sort, in: query, schema: { type: string, enum: [risk_asc, risk_desc, stars, recent, name] } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 24, maximum: 100 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpListResponse"
+    post:
+      tags: [mcps]
+      operationId: submitMcp
+      security: [{ session: [] }, { apiKey: [] }]
+      description: Submit a new MCP (or a new version of an existing source). Enqueues ingestion + audit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitMcpRequest"
+      responses:
+        "202":
+          description: Accepted; ingestion + first audit queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmitMcpResponse"
+        "422":
+          $ref: "#/components/responses/Error"
+  /v1/mcps/{mcpId}:
+    get:
+      tags: [mcps]
+      operationId: getMcp
+      parameters:
+        - $ref: "#/components/parameters/McpId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpDetailResponse"
+        "404":
+          $ref: "#/components/responses/Error"
+    patch:
+      tags: [mcps]
+      operationId: updateMcp
+      security: [{ session: [] }]
+      description: Publisher/admin edits metadata (display name, description, tags).
+      parameters:
+        - $ref: "#/components/parameters/McpId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/McpUpdateRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpDetailResponse"
+        "403":
+          $ref: "#/components/responses/Error"
+  /v1/mcps/{mcpId}/versions:
+    get:
+      tags: [mcps, versions]
+      operationId: listVersions
+      parameters:
+        - $ref: "#/components/parameters/McpId"
+      responses:
+        "200":
+          description: Version timeline with scores and deltas.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VersionSummary"
+  /v1/mcps/{mcpId}/score-history:
+    get:
+      tags: [mcps]
+      operationId: getScoreHistory
+      parameters:
+        - $ref: "#/components/parameters/McpId"
+      responses:
+        "200":
+          description: Score over time (for trend charts).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ScoreHistoryPoint"
+  /v1/mcps/{mcpId}/docs:
+    get:
+      tags: [mcps]
+      operationId: getMcpDocs
+      parameters:
+        - $ref: "#/components/parameters/McpId"
+        - { name: version, in: query, schema: { type: string }, description: Defaults to latest audited version }
+      responses:
+        "200":
+          description: Auto-generated docs pages.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DocPageResponse"
+
+  # ---------------- versions ----------------
+  /v1/versions/{versionId}:
+    get:
+      tags: [versions]
+      operationId: getVersion
+      parameters:
+        - $ref: "#/components/parameters/VersionId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VersionDetailResponse"
+        "404":
+          $ref: "#/components/responses/Error"
+  /v1/versions/{versionId}/diff:
+    get:
+      tags: [versions]
+      operationId: getVersionDiff
+      parameters:
+        - $ref: "#/components/parameters/VersionId"
+        - { name: against, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Tool-schema / permission / dependency / description diff between two versions.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VersionDiffResponse"
+  /v1/versions/{versionId}/score:
+    get:
+      tags: [versions]
+      operationId: getVersionScore
+      parameters:
+        - $ref: "#/components/parameters/VersionId"
+      responses:
+        "200":
+          description: Current score with per-category breakdown + explainability.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScoreResponse"
+  /v1/versions/{versionId}/audits:
+    get:
+      tags: [versions, audits]
+      operationId: listVersionAudits
+      parameters:
+        - $ref: "#/components/parameters/VersionId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditSummary"
+    post:
+      tags: [versions, audits]
+      operationId: triggerAudit
+      security: [{ session: [] }, { apiKey: [] }]
+      description: Queue a re-audit (publisher/auditor/admin; rate-limited for others).
+      parameters:
+        - $ref: "#/components/parameters/VersionId"
+      responses:
+        "202":
+          description: Queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditSummary"
+
+  # ---------------- audits ----------------
+  /v1/audits/{auditId}:
+    get:
+      tags: [audits]
+      operationId: getAudit
+      parameters:
+        - $ref: "#/components/parameters/AuditId"
+      responses:
+        "200":
+          description: Audit status + per-agent run states.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditDetailResponse"
+  /v1/audits/{auditId}/findings:
+    get:
+      tags: [audits]
+      operationId: getAuditFindings
+      parameters:
+        - $ref: "#/components/parameters/AuditId"
+        - { name: severity, in: query, schema: { $ref: "#/components/schemas/Severity" } }
+        - { name: category, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FindingResponse"
+  /v1/audits/{auditId}/events:
+    get:
+      tags: [audits]
+      operationId: getAuditEvents
+      description: Server-Sent Events stream of live audit status (agent started/finished, score ready).
+      parameters:
+        - $ref: "#/components/parameters/AuditId"
+      responses:
+        "200":
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  # ---------------- reviews (community) ----------------
+  /v1/mcps/{mcpId}/reviews:
+    get:
+      tags: [reviews]
+      operationId: listReviews
+      parameters:
+        - $ref: "#/components/parameters/McpId"
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewListResponse"
+    post:
+      tags: [reviews]
+      operationId: createReview
+      security: [{ session: [] }]
+      description: One review per user per version.
+      parameters:
+        - $ref: "#/components/parameters/McpId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReviewCreateRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewResponse"
+        "409":
+          $ref: "#/components/responses/Error"
+  /v1/reviews/{reviewId}:
+    patch:
+      tags: [reviews]
+      operationId: updateReview
+      security: [{ session: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ReviewId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReviewCreateRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewResponse"
+    delete:
+      tags: [reviews]
+      operationId: deleteReview
+      security: [{ session: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ReviewId"
+      responses:
+        "204":
+          description: Deleted
+
+  # ---------------- reports + flags (quarantine fast path) ----------------
+  /v1/mcps/{mcpId}/reports:
+    post:
+      tags: [reports]
+      operationId: createReport
+      security: [{ session: [] }, { apiKey: [] }]
+      description: |
+        Structured malicious-behavior report. When the count of credible high-severity reports
+        crosses the configured threshold, the MCP is flipped to DANGEROUS immediately
+        (fast-path quarantine) and a priority re-audit is queued.
+      parameters:
+        - $ref: "#/components/parameters/McpId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportCreateRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportResponse"
+  /v1/mcps/{mcpId}/appeal:
+    post:
+      tags: [reports]
+      operationId: appealMcp
+      security: [{ session: [] }]
+      description: Publisher responds to / appeals a quarantine.
+      parameters:
+        - $ref: "#/components/parameters/McpId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AppealRequest"
+      responses:
+        "202":
+          description: Appeal recorded
+  /v1/uploads/presign:
+    post:
+      tags: [reports]
+      operationId: presignUpload
+      security: [{ session: [] }, { apiKey: [] }]
+      description: Presigned S3 URL for report evidence upload.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PresignRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PresignResponse"
+
+  # ---------------- gateway / CLI ----------------
+  /v1/verdicts/check:
+    post:
+      tags: [gateway]
+      operationId: checkVerdicts
+      security: [{ apiKey: [] }]
+      description: Batch verdict lookup for CLI/gateway before install/connect.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerdictCheckRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerdictCheckResponse"
+  /v1/verdicts/revocations:
+    get:
+      tags: [gateway]
+      operationId: getRevocations
+      security: [{ apiKey: [] }]
+      description: Feed of verdict changes/quarantines since a cursor, for gateway cache invalidation.
+      parameters:
+        - { name: since, in: query, required: true, schema: { type: string }, description: Opaque cursor or ISO timestamp }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevocationFeedResponse"
+
+  # ---------------- hosting ----------------
+  /v1/mcps/{mcpId}/hosted:
+    post:
+      tags: [hosting]
+      operationId: createHostedInstance
+      security: [{ session: [] }]
+      description: One-click hosted access to an audited MCP through the gateway. Blocked for DANGEROUS/HIGH_RISK.
+      parameters:
+        - $ref: "#/components/parameters/McpId"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HostedInstanceResponse"
+        "409":
+          $ref: "#/components/responses/Error"
+  /v1/hosted/{instanceId}:
+    get:
+      tags: [hosting]
+      operationId: getHostedInstance
+      security: [{ session: [] }]
+      parameters:
+        - $ref: "#/components/parameters/InstanceId"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HostedInstanceResponse"
+    delete:
+      tags: [hosting]
+      operationId: deleteHostedInstance
+      security: [{ session: [] }]
+      parameters:
+        - $ref: "#/components/parameters/InstanceId"
+      responses:
+        "204":
+          description: Deleted
+  /v1/hosted/{instanceId}/usage:
+    get:
+      tags: [hosting]
+      operationId: getHostedUsage
+      security: [{ session: [] }]
+      parameters:
+        - $ref: "#/components/parameters/InstanceId"
+      responses:
+        "200":
+          description: Usage metering
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsageResponse"
+
+  # ---------------- admin ----------------
+  /v1/admin/reports:
+    get:
+      tags: [admin]
+      operationId: adminListReports
+      security: [{ session: [] }]
+      description: Auditor/admin triage queue.
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [open, resolved, dismissed] } }
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ReportResponse"
+        "403":
+          $ref: "#/components/responses/Error"
+  /v1/admin/reports/{reportId}/resolve:
+    post:
+      tags: [admin]
+      operationId: adminResolveReport
+      security: [{ session: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ReportId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReportResolveRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReportResponse"
+  /v1/admin/mcps/{mcpId}/quarantine:
+    post:
+      tags: [admin]
+      operationId: adminQuarantineMcp
+      security: [{ session: [] }]
+      description: Immediately set verdict DANGEROUS + emit revocation + queue priority re-audit.
+      parameters:
+        - $ref: "#/components/parameters/McpId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuarantineRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpDetailResponse"
+  /v1/admin/audit-log:
+    get:
+      tags: [admin]
+      operationId: adminAuditLog
+      security: [{ session: [] }]
+      parameters:
+        - { name: cursor, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: All admin actions and verdict changes.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditLogEntry"
+
+components:
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: mcpaudit_session
+    apiKey:
+      type: http
+      scheme: bearer
+      description: API key, `mcpa_...`
+
+  parameters:
+    McpId: { name: mcpId, in: path, required: true, schema: { type: string, format: uuid } }
+    VersionId: { name: versionId, in: path, required: true, schema: { type: string, format: uuid } }
+    AuditId: { name: auditId, in: path, required: true, schema: { type: string, format: uuid } }
+    ReviewId: { name: reviewId, in: path, required: true, schema: { type: string, format: uuid } }
+    ReportId: { name: reportId, in: path, required: true, schema: { type: string, format: uuid } }
+    InstanceId: { name: instanceId, in: path, required: true, schema: { type: string, format: uuid } }
+    KeyId: { name: keyId, in: path, required: true, schema: { type: string, format: uuid } }
+
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, version]
+      properties:
+        status: { type: string, enum: [ok] }
+        version: { type: string }
+        services:
+          type: object
+          properties:
+            db: { type: string, enum: [up, down] }
+            redis: { type: string, enum: [up, down] }
+            s3: { type: string, enum: [up, down] }
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details: { type: object }
+
+    Role: { type: string, enum: [user, publisher, auditor, admin] }
+    Verdict:
+      type: string
+      enum: [VERIFIED_SAFE, LOW_RISK, MODERATE_RISK, HIGH_RISK, DANGEROUS, PENDING]
+    Severity: { type: string, enum: [info, low, medium, high, critical] }
+    SourceType: { type: string, enum: [github, npm, pypi, docker, remote_url] }
+    AuditStatus:
+      type: string
+      enum: [queued, ingesting, running, scoring, completed, failed, partial]
+    AgentRunStatus:
+      type: string
+      enum: [pending, running, succeeded, failed, timed_out, skipped]
+    CategoryKey:
+      type: string
+      enum: [secrets_exfil, malware_exec, supply_chain, prompt_injection, capability_excess, protocol_reliability, compliance, community]
+
+    UserResponse:
+      type: object
+      required: [id, email, displayName, role, reputation, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        displayName: { type: string }
+        role: { $ref: "#/components/schemas/Role" }
+        reputation: { type: number }
+        createdAt: { type: string, format: date-time }
+
+    RegisterRequest:
+      type: object
+      required: [email, password, displayName]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 10 }
+        displayName: { type: string, minLength: 2, maxLength: 64 }
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+
+    ApiKeyCreateRequest:
+      type: object
+      required: [name, scopes]
+      properties:
+        name: { type: string }
+        scopes:
+          type: array
+          items: { type: string, enum: [read, submit, gateway] }
+
+    ApiKeyResponse:
+      type: object
+      required: [id, name, scopes, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        scopes: { type: array, items: { type: string } }
+        createdAt: { type: string, format: date-time }
+        lastUsedAt: { type: string, format: date-time, nullable: true }
+
+    ApiKeyCreatedResponse:
+      allOf:
+        - $ref: "#/components/schemas/ApiKeyResponse"
+        - type: object
+          required: [plaintextKey]
+          properties:
+            plaintextKey: { type: string }
+
+    SourceRef:
+      type: object
+      required: [type, locator]
+      properties:
+        type: { $ref: "#/components/schemas/SourceType" }
+        locator:
+          type: string
+          description: github URL | npm pkg[@version] | pypi pkg[@version] | docker image[:tag] | https remote endpoint
+        ref: { type: string, description: Requested tag/branch/version (optional) }
+
+    PinnedSource:
+      type: object
+      required: [type, locator, pinnedRef, digest]
+      properties:
+        type: { $ref: "#/components/schemas/SourceType" }
+        locator: { type: string }
+        pinnedRef: { type: string, description: commit SHA | exact version | image digest reference }
+        digest: { type: string, description: sha256 of snapshot tarball / package / manifest }
+
+    SubmitMcpRequest:
+      type: object
+      required: [source]
+      properties:
+        source: { $ref: "#/components/schemas/SourceRef" }
+        displayName: { type: string }
+        declaredPurpose: { type: string, description: What the publisher says this MCP does; used by capability agent }
+
+    SubmitMcpResponse:
+      type: object
+      required: [mcpId, versionId, auditId]
+      properties:
+        mcpId: { type: string, format: uuid }
+        versionId: { type: string, format: uuid }
+        auditId: { type: string, format: uuid }
+
+    ToolSpec:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        inputSchema: { type: object }
+
+    McpSummary:
+      type: object
+      required: [id, name, sourceType, verdict, riskScore, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        sourceType: { $ref: "#/components/schemas/SourceType" }
+        sourceLocator: { type: string }
+        verdict: { $ref: "#/components/schemas/Verdict" }
+        riskScore: { type: integer, minimum: 0, maximum: 100, nullable: true }
+        latestVersion: { type: string, nullable: true }
+        starsAvg: { type: number }
+        reviewCount: { type: integer }
+        quarantined: { type: boolean }
+        createdAt: { type: string, format: date-time }
+
+    McpListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/McpSummary" }
+        nextCursor: { type: string, nullable: true }
+
+    McpUpdateRequest:
+      type: object
+      properties:
+        displayName: { type: string }
+        description: { type: string }
+        declaredPurpose: { type: string }
+        tags: { type: array, items: { type: string } }
+
+    McpDetailResponse:
+      allOf:
+        - $ref: "#/components/schemas/McpSummary"
+        - type: object
+          properties:
+            publisher: { $ref: "#/components/schemas/UserResponse" }
+            declaredPurpose: { type: string }
+            tags: { type: array, items: { type: string } }
+            currentScore: { $ref: "#/components/schemas/ScoreResponse" }
+            tools:
+              type: array
+              items: { $ref: "#/components/schemas/ToolSpec" }
+
+    VersionSummary:
+      type: object
+      required: [id, versionLabel, pinnedRef, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        versionLabel: { type: string }
+        pinnedRef: { type: string }
+        digest: { type: string }
+        status: { $ref: "#/components/schemas/AuditStatus" }
+        verdict: { $ref: "#/components/schemas/Verdict" }
+        riskScore: { type: integer, nullable: true }
+        scoreDelta: { type: integer, nullable: true, description: vs previous audited version }
+        createdAt: { type: string, format: date-time }
+
+    VersionDetailResponse:
+      allOf:
+        - $ref: "#/components/schemas/VersionSummary"
+        - type: object
+          properties:
+            mcpId: { type: string, format: uuid }
+            manifest: { type: object }
+            tools:
+              type: array
+              items: { $ref: "#/components/schemas/ToolSpec" }
+            snapshotKey: { type: string, description: S3 key of immutable source snapshot }
+
+    VersionDiffResponse:
+      type: object
+      properties:
+        toolsAdded: { type: array, items: { type: string } }
+        toolsRemoved: { type: array, items: { type: string } }
+        descriptionsChanged: { type: array, items: { type: string } }
+        permissionsAdded: { type: array, items: { type: string } }
+        dependenciesAdded: { type: array, items: { type: string } }
+        dependenciesRemoved: { type: array, items: { type: string } }
+        networkHostsAdded: { type: array, items: { type: string } }
+        rugPullSignals: { type: array, items: { type: string } }
+
+    CategoryScore:
+      type: object
+      required: [category, score, topFindingIds]
+      properties:
+        category: { $ref: "#/components/schemas/CategoryKey" }
+        score: { type: integer, minimum: 0, maximum: 100 }
+        topFindingIds: { type: array, items: { type: string, format: uuid } }
+
+    ScoreResponse:
+      type: object
+      required: [riskScore, verdict, categories, configVersion, scoredAt, explainability]
+      properties:
+        riskScore: { type: integer, minimum: 0, maximum: 100 }
+        verdict: { $ref: "#/components/schemas/Verdict" }
+        categories:
+          type: array
+          items: { $ref: "#/components/schemas/CategoryScore" }
+        hardFailsTriggered: { type: array, items: { type: string } }
+        configVersion: { type: string }
+        agentVersions: { type: object, additionalProperties: { type: string } }
+        llmSummary: { type: string, description: Plain-language judge summary; never overrides hard fails }
+        scoredAt: { type: string, format: date-time }
+        explainability:
+          type: object
+          description: category -> list of {findingId, points}
+          additionalProperties:
+            type: array
+            items:
+              type: object
+              properties:
+                findingId: { type: string, format: uuid }
+                points: { type: number }
+
+    ScoreHistoryPoint:
+      type: object
+      required: [at, riskScore, verdict, versionId, auditId]
+      properties:
+        at: { type: string, format: date-time }
+        riskScore: { type: integer }
+        verdict: { $ref: "#/components/schemas/Verdict" }
+        versionId: { type: string, format: uuid }
+        auditId: { type: string, format: uuid }
+
+    AgentRunSummary:
+      type: object
+      required: [agentId, status]
+      properties:
+        agentId: { type: string }
+        agentVersion: { type: string }
+        status: { $ref: "#/components/schemas/AgentRunStatus" }
+        durationMs: { type: integer }
+        findingCount: { type: integer }
+        error: { type: string, nullable: true }
+
+    AuditSummary:
+      type: object
+      required: [id, versionId, status, trigger, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        versionId: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/AuditStatus" }
+        trigger: { type: string, enum: [submit, manual, scheduled, drift, quarantine, rules_update] }
+        createdAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time, nullable: true }
+
+    AuditDetailResponse:
+      allOf:
+        - $ref: "#/components/schemas/AuditSummary"
+        - type: object
+          properties:
+            agentRuns:
+              type: array
+              items: { $ref: "#/components/schemas/AgentRunSummary" }
+            score: { $ref: "#/components/schemas/ScoreResponse" }
+
+    FindingResponse:
+      type: object
+      required: [id, agentId, category, severity, confidence, title, description, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        agentId: { type: string }
+        category: { $ref: "#/components/schemas/CategoryKey" }
+        severity: { $ref: "#/components/schemas/Severity" }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+        title: { type: string }
+        description: { type: string }
+        evidence:
+          type: object
+          description: file:line, network log ref, snippet, sandbox event ref
+          properties:
+            file: { type: string }
+            line: { type: integer }
+            snippet: { type: string }
+            artifactKey: { type: string, description: S3 key in evidence bucket }
+            networkLog: { type: string }
+        remediation: { type: string }
+        cwe: { type: string, nullable: true }
+        owasp: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+    ReviewCreateRequest:
+      type: object
+      required: [versionId, stars, body]
+      properties:
+        versionId: { type: string, format: uuid }
+        stars: { type: integer, minimum: 1, maximum: 5 }
+        body: { type: string, minLength: 10, maxLength: 5000 }
+
+    ReviewResponse:
+      type: object
+      required: [id, mcpId, versionId, stars, body, author, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        mcpId: { type: string, format: uuid }
+        versionId: { type: string, format: uuid }
+        stars: { type: integer }
+        body: { type: string }
+        author: { $ref: "#/components/schemas/UserResponse" }
+        createdAt: { type: string, format: date-time }
+
+    ReviewListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/ReviewResponse" }
+        nextCursor: { type: string, nullable: true }
+
+    ReportKind: { type: string, enum: [malware, data_exfil, prompt_injection, other] }
+
+    ReportCreateRequest:
+      type: object
+      required: [kind, severity, description]
+      properties:
+        kind: { $ref: "#/components/schemas/ReportKind" }
+        severity: { $ref: "#/components/schemas/Severity" }
+        description: { type: string, minLength: 20 }
+        evidenceKeys:
+          type: array
+          items: { type: string }
+          description: S3 keys from /v1/uploads/presign
+
+    ReportResponse:
+      type: object
+      required: [id, mcpId, kind, severity, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        mcpId: { type: string, format: uuid }
+        kind: { $ref: "#/components/schemas/ReportKind" }
+        severity: { $ref: "#/components/schemas/Severity" }
+        status: { type: string, enum: [open, resolved, dismissed] }
+        description: { type: string }
+        reporterReputation: { type: number }
+        createdAt: { type: string, format: date-time }
+
+    ReportResolveRequest:
+      type: object
+      required: [resolution]
+      properties:
+        resolution: { type: string, enum: [confirmed, dismissed] }
+        note: { type: string }
+
+    AppealRequest:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string, minLength: 20 }
+
+    QuarantineRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string }
+
+    PresignRequest:
+      type: object
+      required: [filename, contentType]
+      properties:
+        filename: { type: string }
+        contentType: { type: string }
+        sizeBytes: { type: integer, maximum: 26214400 }
+
+    PresignResponse:
+      type: object
+      required: [uploadUrl, key, expiresAt]
+      properties:
+        uploadUrl: { type: string }
+        key: { type: string }
+        expiresAt: { type: string, format: date-time }
+
+    VerdictCheckItem:
+      type: object
+      required: [source]
+      properties:
+        source: { $ref: "#/components/schemas/SourceRef" }
+        pinnedRef: { type: string, description: "If set, verdict applies to that exact version only" }
+
+    VerdictCheckRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/VerdictCheckItem" }
+          maxItems: 50
+
+    VerdictResult:
+      type: object
+      required: [source, known]
+      properties:
+        source: { $ref: "#/components/schemas/SourceRef" }
+        known: { type: boolean, description: false = never audited -> treat as unverified }
+        verdict: { $ref: "#/components/schemas/Verdict" }
+        riskScore: { type: integer, nullable: true }
+        versionId: { type: string, format: uuid, nullable: true }
+        pinnedRef: { type: string, nullable: true }
+        quarantined: { type: boolean }
+        block: { type: boolean, description: "Gateway enforcement hint: block install/connect" }
+        warn: { type: boolean }
+        reason: { type: string }
+        checkedAt: { type: string, format: date-time }
+
+    VerdictCheckResponse:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/VerdictResult" }
+
+    RevocationEvent:
+      type: object
+      required: [cursor, mcpId, kind, at]
+      properties:
+        cursor: { type: string }
+        mcpId: { type: string, format: uuid }
+        source: { $ref: "#/components/schemas/SourceRef" }
+        kind: { type: string, enum: [quarantined, verdict_changed, released] }
+        verdict: { $ref: "#/components/schemas/Verdict" }
+        reason: { type: string }
+        at: { type: string, format: date-time }
+
+    RevocationFeedResponse:
+      type: object
+      required: [events, nextCursor]
+      properties:
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/RevocationEvent" }
+        nextCursor: { type: string }
+
+    DocPageResponse:
+      type: object
+      required: [slug, title, markdown, generatedAt]
+      properties:
+        slug: { type: string }
+        title: { type: string }
+        markdown: { type: string }
+        generatedAt: { type: string, format: date-time }
+
+    HostedInstanceResponse:
+      type: object
+      required: [id, mcpId, versionId, endpointUrl, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        mcpId: { type: string, format: uuid }
+        versionId: { type: string, format: uuid }
+        endpointUrl: { type: string, description: Gateway-fronted MCP endpoint }
+        status: { type: string, enum: [provisioning, running, suspended, revoked] }
+        createdAt: { type: string, format: date-time }
+
+    UsageResponse:
+      type: object
+      properties:
+        instanceId: { type: string, format: uuid }
+        windowStart: { type: string, format: date-time }
+        requests: { type: integer }
+        toolCalls: { type: integer }
+        blockedCalls: { type: integer }
+
+    AuditLogEntry:
+      type: object
+      required: [id, actorId, action, at]
+      properties:
+        id: { type: string, format: uuid }
+        actorId: { type: string, format: uuid }
+        action: { type: string }
+        targetType: { type: string }
+        targetId: { type: string }
+        detail: { type: object }
+        at: { type: string, format: date-time }
